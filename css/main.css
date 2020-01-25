@@ -4483,3 +4483,8 @@ dl.accordion.time-line:before {
 }
 
 /*-------- end footer Area -------------*/
+
+.siteLogo {
+  width: 40%;
+  height: auto;
+}
