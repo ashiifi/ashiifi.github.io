@@ -4493,3 +4493,9 @@ dl.accordion.time-line:before {
   width: 40%;
   height: auto;
 }
+
+@media (max-width:768px) {
+  .img-fluid {
+    display: none;
+  }
+}
