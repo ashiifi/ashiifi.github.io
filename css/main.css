@@ -4495,7 +4495,8 @@ dl.accordion.time-line:before {
 }
 
 @media (max-width:768px) {
-  .img-fluid {
-    display: none;
+   .aboutImage {
+    width: 75%;
+    height: auto;
   }
 }
