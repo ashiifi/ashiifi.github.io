@@ -1,82 +1,317 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>ComEd Live Electricity Price</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      background: #f5f5f5;
-      color: #333;
-      margin: 0;
-    }
+<meta charset="UTF-8" />
+<title>Comed Hourly Pricing Dashboard</title>
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  /* Apple system font stack */
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #fff;
+    margin: 2rem;
+    color: #1c1c1e;
+    text-align: center;
+  }
+  h1 {
+    font-weight: 700;
+    font-size: 2.5rem;
+    margin-bottom: 0.15rem;
+    letter-spacing: -0.02em;
+    color: #0071e3;
+  }
+  #byline {
+    font-style: italic;
+    font-weight: 400;
+    font-size: 1rem;
+    color: #636366;
+    margin-bottom: 1.8rem;
+  }
+  #byline a {
+    color: #0071e3;
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
+  #byline a:hover {
+    color: #004bb5;
+    text-decoration: underline;
+  }
+  #currentPrice {
+    font-weight: 700;
+    font-size: 4rem;
+    margin-bottom: 0.3rem;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  #lastUpdated {
+    font-size: 1.1rem;
+    color: #636366;
+    margin-bottom: 3rem;
+  }
+  .cheap { color: #30d158; }
+  .normal { color: #ff9f0a; }
+  .expensive { color: #ff453a; }
 
-    h1 {
-      margin-bottom: 10px;
-    }
+  .chart-title {
+    font-weight: 600;
+    font-size: 1.2rem;
+    color: #1c1c1e;
+    margin: 1rem 0 0.5rem 0;
+    text-align: left;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+    user-select: none;
+  }
 
-    #price {
-      font-size: 2rem;
-      margin: 10px 0;
-    }
-
-    #timestamp {
-      font-size: 1rem;
-      color: #777;
-    }
-
-    .cheap { color: green; }
-    .normal { color: orange; }
-    .expensive { color: red; }
-  </style>
+  .chart-container {
+    max-width: 900px;
+    margin: 0 auto 4rem;
+  }
+  canvas {
+    background: #f9f9f9;
+    border-radius: 14px;
+    box-shadow:
+      0 4px 6px rgb(0 0 0 / 0.1),
+      0 1px 3px rgb(0 0 0 / 0.06);
+  }
+</style>
 </head>
 <body>
-  <h1>⚡ ComEd Real-Time Electricity Price</h1>
-  <div id="price">Loading...</div>
-  <div id="timestamp"></div>
+  <h1>Comed Hourly Pricing Dashboard</h1>
+  <div id="byline">
+    created by 
+    <a href="https://www.linkedin.com/in/abubakrsharif/" target="_blank" rel="noopener noreferrer">Abubakr Sharif</a>
+  </div>
 
-  <script>
-    async function fetchPrice() {
-      try {
-        const proxyUrl = 'https://corsproxy.io/?';
-        const targetUrl = 'https://hourlypricing.comed.com/api?type=5minutefeed&format=json';
-        const response = await fetch(proxyUrl + encodeURIComponent(targetUrl));
-        const data = await response.json();
-        const latest = data[data.length - 1];
-        const priceCents = parseFloat(latest.price);
-        const priceDollars = (priceCents / 100).toFixed(4);
-        const millis = parseInt(latest.millisUTC);
-        const timestamp = new Date(millis);
+  <div id="currentPrice" class="">Loading...</div>
+  <div id="lastUpdated"></div>
 
-        const priceEl = document.getElementById('price');
-        const tsEl = document.getElementById('timestamp');
+  <div class="chart-container">
+    <div class="chart-title">Recent 5-Minute Interval Prices (Past 5 Hours)</div>
+    <canvas id="fiveMinChart"></canvas>
+  </div>
 
-        // Apply color class based on price threshold
-        priceEl.className = '';
-        if (priceCents < 3) {
-          priceEl.classList.add('cheap');
-        } else if (priceCents < 10) {
-          priceEl.classList.add('normal');
-        } else {
-          priceEl.classList.add('expensive');
+  <div class="chart-container">
+    <div class="chart-title">Hourly Average Price (Past 1 Day)</div>
+    <canvas id="hourlyAvgChart"></canvas>
+  </div>
+
+<script>
+const proxyUrl = 'https://corsproxy.io/?';
+const feedUrl = 'https://hourlypricing.comed.com/api?type=5minutefeed&format=json';
+
+let fiveMinChart, hourlyAvgChart;
+
+function getColorForPrice(price) {
+  if (price < 0.04) return '#30d158';
+  if (price < 0.10) return '#ff9f0a';
+  return '#ff453a';
+}
+
+function zpad(num) {
+  return num.toString().padStart(2, '0');
+}
+
+async function fetchData() {
+  const resp = await fetch(proxyUrl + encodeURIComponent(feedUrl));
+  return await resp.json();
+}
+
+function buildFiveMinChart(data) {
+  const now = Date.now();
+  const cutoff = now - 5 * 60 * 60 * 1000;
+  const recent = data.filter(d => +d.millisUTC >= cutoff);
+  recent.sort((a, b) => +a.millisUTC - +b.millisUTC);
+
+  const sampled = recent.filter(d => {
+    const dt = new Date(+d.millisUTC);
+    const mins = dt.getMinutes();
+    return mins % 15 === 0;
+  });
+
+  const labels = sampled.map(d => new Date(+d.millisUTC).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
+  const values = sampled.map(d => +d.price / 100);
+  const pointColors = sampled.map(d => getColorForPrice(+d.price / 100));
+
+  if (fiveMinChart) fiveMinChart.destroy();
+
+  const ctx = document.getElementById('fiveMinChart').getContext('2d');
+  fiveMinChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: '5-Min Price ($/kWh)',
+        data: values,
+        borderColor: '#0071e3',
+        backgroundColor: 'rgba(0,113,227,0.15)',
+        fill: true,
+        tension: 0.4,
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: '#fff',
+        borderWidth: 3,
+        cubicInterpolationMode: 'monotone',
+      }]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          backgroundColor: '#0071e3',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          callbacks: {
+            label: context => `$${context.parsed.y.toFixed(4)} / kWh`
+          }
         }
-
-        priceEl.textContent = `$${priceDollars} / kWh`;
-        tsEl.textContent = `Last updated: ${timestamp.toLocaleString()}`;
-      } catch (err) {
-        console.error('Error fetching price:', err);
-        document.getElementById('price').textContent = 'Error fetching data';
-        document.getElementById('timestamp').textContent = '';
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#1c1c1e',
+            maxRotation: 45,
+            minRotation: 45,
+            font: { weight: '600', size: 14 }
+          },
+          grid: { display: false }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1c1c1e',
+            callback: val => `$${val.toFixed(3)}`,
+            font: { weight: '600' }
+          },
+          grid: {
+            color: 'rgba(0,113,227,0.1)',
+            borderDash: [5, 5]
+          }
+        }
       }
     }
+  });
+}
 
-    fetchPrice();
-    setInterval(fetchPrice, 5 * 60 * 1000); // every 5 minutes
-  </script>
+function buildHourlyAvgChart(data, days = 1) {
+  const now = Date.now();
+  const cutoff = now - days * 24 * 60 * 60 * 1000;
+  const relevant = data.filter(d => +d.millisUTC >= cutoff);
+
+  const hourly = {};
+  relevant.forEach(entry => {
+    const date = new Date(+entry.millisUTC);
+    const key = `${date.getFullYear()}-${zpad(date.getMonth()+1)}-${zpad(date.getDate())}T${zpad(date.getHours())}`;
+    if (!hourly[key]) hourly[key] = [];
+    hourly[key].push(+entry.price);
+  });
+
+  const entries = Object.entries(hourly).sort((a,b) => new Date(a[0]) - new Date(b[0]));
+
+  const labels = entries.map(e => {
+    const [datePart, hourPart] = e[0].split('T');
+    const [year, month, day] = datePart.split('-').map(Number);
+    const hour = Number(hourPart);
+    const dt = new Date(year, month - 1, day, hour);
+    return dt.toLocaleString([], {month:'short', day:'numeric', hour:'numeric'} );
+  });
+
+  const avgPrices = entries.map(e => ((e[1].reduce((s,p)=>s+p,0) / e[1].length) / 100));
+  const barColors = avgPrices.map(p => getColorForPrice(p));
+  const values = avgPrices.map(p => +p.toFixed(4));
+
+  if (hourlyAvgChart) hourlyAvgChart.destroy();
+
+  const ctx = document.getElementById('hourlyAvgChart').getContext('2d');
+  hourlyAvgChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Hourly Avg ($/kWh)',
+        data: values,
+        backgroundColor: barColors,
+        borderRadius: 8,
+        borderSkipped: false,
+        maxBarThickness: 50
+      }]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'nearest', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { 
+          enabled: true,
+          backgroundColor: '#0071e3',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          callbacks: {
+            label: context => `$${context.parsed.y.toFixed(4)} / kWh`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#1c1c1e',
+            maxRotation: 45,
+            minRotation: 45,
+            font: { weight: '600', size: 14 }
+          },
+          grid: { display: false }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1c1c1e',
+            callback: val => `$${val.toFixed(3)}`,
+            font: { weight: '600' }
+          },
+          grid: {
+            color: 'rgba(0,113,227,0.1)',
+            borderDash: [5, 5]
+          }
+        }
+      }
+    }
+  });
+}
+
+async function updateDashboard() {
+  const data = await fetchData();
+
+  const now = Date.now();
+  const validEntries = data.filter(d => +d.millisUTC <= now);
+  const latest = validEntries.reduce((prev, curr) => +curr.millisUTC > +prev.millisUTC ? curr : prev, validEntries[0]);
+  const priceDollars = (+latest.price / 100);
+  const priceFixed = priceDollars.toFixed(4);
+  const currentPriceEl = document.getElementById('currentPrice');
+  currentPriceEl.textContent = `$${priceFixed} / kWh`;
+  currentPriceEl.className = '';
+  currentPriceEl.classList.add(
+    priceDollars < 0.04 ? 'cheap' :
+    priceDollars < 0.10 ? 'normal' : 'expensive'
+  );
+
+  const lastUpdatedEl = document.getElementById('lastUpdated');
+  const timestamp = new Date(+latest.millisUTC);
+  lastUpdatedEl.textContent = `Last updated: ${timestamp.toLocaleString('en-US', { timeZone: 'America/Chicago' })} CST`;
+
+  buildFiveMinChart(data);
+  buildHourlyAvgChart(data, 1);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  updateDashboard();
+  setInterval(updateDashboard, 5 * 60 * 1000);
+});
+</script>
 </body>
 </html>
