@@ -125,15 +125,14 @@ function buildFiveMinChart(data) {
   const recent = data.filter(d => +d.millisUTC >= cutoff);
   recent.sort((a, b) => +a.millisUTC - +b.millisUTC);
 
-  const sampled = recent.filter(d => {
+  const labels = recent.map((d, i) => {
     const dt = new Date(+d.millisUTC);
-    const mins = dt.getMinutes();
-    return mins % 15 === 0;
+    return dt.getMinutes() % 15 === 0
+      ? dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
   });
-
-  const labels = sampled.map(d => new Date(+d.millisUTC).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
-  const values = sampled.map(d => +d.price / 100);
-  const pointColors = sampled.map(d => getColorForPrice(+d.price / 100));
+  const values = recent.map(d => +d.price / 100);
+  const pointColors = recent.map(d => getColorForPrice(+d.price / 100));
 
   if (fiveMinChart) fiveMinChart.destroy();
 
