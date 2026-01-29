@@ -1049,10 +1049,29 @@ async function fetchData() {
   try {
     const resp = await fetch(proxyUrl + encodeURIComponent(feedUrl));
     if (!resp.ok) throw new Error('API failed');
-    return await resp.json();
+    const data = await resp.json();
+    if (!data || data.length === 0) throw new Error('Empty response from API');
+    return data;
   } catch (error) {
     console.error('Fetch error:', error);
+    // Try alternative CORS proxy
+    try {
+      const altResp = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(feedUrl));
+      if (!altResp.ok) throw new Error('Alt proxy also failed');
+      const data = await altResp.json();
+      if (data && data.length > 0) return data;
+    } catch (altError) {
+      console.error('Alternative proxy also failed:', altError);
+    }
+    showErrorMessage('Unable to load pricing data. The service may be temporarily unavailable.');
     return [];
+  }
+}
+
+function showErrorMessage(msg) {
+  const container = document.getElementById('metrics-container');
+  if (container) {
+    container.innerHTML = `<div style="grid-column: 1/-1; padding: 2rem; text-align: center; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; color: #856404;"><strong>⚠️ Data Load Error:</strong> ${msg}</div>` + container.innerHTML;
   }
 }
 
